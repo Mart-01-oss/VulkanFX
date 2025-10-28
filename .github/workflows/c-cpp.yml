@@ -1,70 +1,86 @@
-name: Build VulkanFX for Android (aarch64)
+name: VulkanFX (NDK Bionic Build)
 
 on:
   push:
-    branches: [ VulkanFX ]
   pull_request:
-    branches: [ VulkanFX ]
 
 jobs:
-  build-android:
-    runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-22.04-arm
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout source
+      uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-pip ninja-build meson pkg-config cmake meson git wget unzip glslang-tools
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3 python3-pip ninja-build meson pkg-config cmake \
+          git wget unzip glslang-tools build-essential libvulkan-dev \
+          libdrm-dev libx11-dev libxi-dev libxrandr-dev libxext-dev
 
-      - name: Download Android NDK r26
-        run: |
-          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip -O ndk.zip
-          unzip -q ndk.zip -d /opt/
-          mv /opt/android-ndk-r26d /opt/ndk
+    - name: Install LLVM/Clang 20
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 20
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+        clang --version
 
-      - name: Create NDK cross file
-        run: |
-          mkdir -p .github
-          cat <<'EOF' > .github/ndk-aarch64.ini
-          [binaries]
-          c = '/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang'
-          cpp = '/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++'
-          ar = '/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
-          strip = '/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
+    - name: Install Android NDK Toolchain
+      run: |
+        wget https://dl.google.com/android/repository/android-ndk-r27b-linux.zip
+        unzip android-ndk-r27b-linux.zip -d $HOME
+        mv $HOME/android-ndk-r27b $HOME/android-ndk
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
+    - name: Create NDK cross-file
+      run: |
+        cat > .github/ndk-aarch64.ini <<'EOF'
+        [binaries]
+        c = '$HOME/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang'
+        cpp = '$HOME/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++'
+        ar = '$HOME/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
+        strip = '$HOME/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
+        pkgconfig = '/usr/bin/pkg-config'
 
-          [paths]
-          prefix = '/out'
-          libdir = 'lib'
-          bindir = 'bin'
+        [host_machine]
+        system = 'android'
+        cpu_family = 'aarch64'
+        cpu = 'armv8-a'
+        endian = 'little'
 
-          [properties]
-          needs_exe_wrapper = true
-          c_args = ['-fPIC', '-O2']
-          cpp_args = ['-fPIC', '-O2']
-          EOF
+        [paths]
+        prefix = '/out'
+        libdir = 'lib'
+        includedir = 'include'
+        EOF
 
-      - name: Build VulkanFX
-        run: |
-          mkdir -p build && cd build
-          meson setup . ../ --cross-file ../.github/ndk-aarch64.ini --prefix=/out --buildtype=release
-          ninja -j$(nproc)
+    - name: Configure Meson build
+      run: |
+        mkdir -p build
+        cd build
+        meson setup . ../ \
+          --cross-file ../.github/ndk-aarch64.ini \
+          --prefix=/out \
+          --buildtype=release \
+          --wrap-mode=forcefallback \
+          -Dcpp_std=c++20
 
-      - name: Collect Artifacts
-        run: |
-          mkdir -p artifact/lib
-          find build -name "*.so" -exec cp {} artifact/lib/ \;
+    - name: Build VulkanFX
+      run: |
+        cd build
+        ninja -j$(nproc)
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: vulkanfx-android-aarch64
-          path: artifact/
+    - name: Package and upload build
+      run: |
+        cd build
+        tar -cf VulkanFX-build.tar out/
+        mv VulkanFX-build.tar $GITHUB_WORKSPACE/
+
+    - name: Upload VulkanFX artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: VulkanFX-Build
+        path: VulkanFX-build.tar
