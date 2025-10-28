@@ -17,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip ninja-build meson pkg-config cmake git wget unzip glslang-tools
+          sudo apt-get install -y python3 python3-pip ninja-build meson pkg-config cmake meson git wget unzip glslang-tools
 
       - name: Download Android NDK r26
         run: |
